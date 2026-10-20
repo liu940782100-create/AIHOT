@@ -1,0 +1,40 @@
+# Keeps the Render free instance awake and doubles as a site health check.
+#
+# Render's free Web Service sleeps after 15 minutes without inbound traffic, and
+# while it sleeps AIHOT's worker (collection, model processing, scheduled jobs)
+# stops with it. A small request on a fixed interval keeps the whole process
+# alive; the 750 free instance-hours a month cover a continuously running
+# service.
+#
+# Set the repository variable AIHOT_SITE_URL to the public site URL so the
+# workflow knows where to knock (Settings -> Secrets and variables -> Actions ->
+# Variables). The fallback below is only a placeholder.
+name: aihot-keepalive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: aihot-keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wake the service and check health
+        env:
+          SITE_URL: ${{ vars.AIHOT_SITE_URL || 'https://aihot.onrender.com' }}
+        run: |
+          set -euo pipefail
+          echo "site: $SITE_URL"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -L --max-time 90 \
+            --retry 2 --retry-delay 5 "$SITE_URL/" || true)
+          echo "GET $SITE_URL/ -> $code"
+          health=$(curl -sS -o /dev/null -w '%{http_code}' -L --max-time 90 \
+            "$SITE_URL/api/health" || true)
+          echo "GET $SITE_URL/api/health -> $health"
+          test "$code" = "200"
